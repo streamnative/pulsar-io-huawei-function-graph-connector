@@ -26,6 +26,7 @@ import com.huaweicloud.sdk.functiongraph.v2.FunctionGraphAsyncClient;
 import com.huaweicloud.sdk.functiongraph.v2.model.AsyncInvokeFunctionRequest;
 import com.huaweicloud.sdk.functiongraph.v2.model.AsyncInvokeFunctionResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pulsar.client.api.Message;
 import org.apache.pulsar.functions.api.Record;
 import org.apache.pulsar.io.core.Sink;
 import org.apache.pulsar.io.core.SinkContext;
@@ -68,15 +69,26 @@ public class FunctionGraphSink implements Sink<byte[]> {
 
     @Override
     public void write(Record<byte[]> record) throws Exception {
+        if (!record.getMessage().isPresent()) {
+            record.ack();
+            return;
+        }
+        Message<byte[]> message = record.getMessage().get();
         final AsyncInvokeFunctionRequest invokeFunctionRequest = new AsyncInvokeFunctionRequest();
         invokeFunctionRequest.setFunctionUrn(functionUrn);
         invokeFunctionRequest.setBody(objectMapper.readValue(record.getValue(), typeRef));
+        if (log.isDebugEnabled()) {
+            log.debug("begin to send functiongraph message id is {}", message.getMessageId());
+        }
         final CompletableFuture<AsyncInvokeFunctionResponse> future = functionGraphAsyncClient.asyncInvokeFunctionAsync(invokeFunctionRequest);
         future.whenComplete((resp, throwable) -> {
             if (throwable != null) {
-                log.error("call function graph error is ", throwable);
+                log.error("call function graph {} error is ", message.getMessageId(), throwable);
                 record.fail();
                 return;
+            }
+            if (log.isDebugEnabled()) {
+                log.debug("success to send functiongraph, message id is {}", message.getMessageId());
             }
             record.ack();
         });
